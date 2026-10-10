@@ -1,7 +1,8 @@
 use std::io;
+use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, OwnedHandle};
 use std::sync::Arc;
-use std::sync::{Mutex, RwLock};
+use std::sync::{Mutex, OnceLock, RwLock};
 use std::time::Duration;
 
 use windows_sys::Win32::Foundation::{
@@ -9,6 +10,9 @@ use windows_sys::Win32::Foundation::{
 };
 use windows_sys::Win32::System::Console::{
     ClosePseudoConsole, CreatePseudoConsole, ResizePseudoConsole, COORD, HPCON,
+};
+use windows_sys::Win32::System::LibraryLoader::{
+    GetProcAddress, LoadLibraryExW, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, LOAD_LIBRARY_SEARCH_SYSTEM32,
 };
 
 use crate::{Result, TerminalGeometry, TerminalSize};
@@ -206,7 +210,7 @@ pub(crate) fn apply_size(pty: &WindowsPty, size: TerminalSize) -> Result<()> {
         .map_err(|_| io::Error::other("ConPTY state lock poisoned"))?;
     // SAFETY: `state.hpc` is an owned live ConPTY handle while the read lock is
     // held, and `coord` was range-checked from `TerminalSize`.
-    let hr = unsafe { ResizePseudoConsole(state.hpc.raw(), coord) };
+    let hr = unsafe { (state.hpc.api.resize)(state.hpc.raw(), coord) };
     drop(state);
     if hr != S_OK {
         if is_benign_resize_after_exit(hr) {
@@ -292,12 +296,13 @@ fn create_pseudo_console(
     output: &PipePair,
     flags: ConptyFlags,
 ) -> Result<OwnedHpcon> {
+    let api = conpty_api()?;
     let mut hpc = 0_isize;
     // SAFETY: `input` and `output` are valid pipe handles owned by the caller,
     // `hpc` is a valid out-pointer, and `coord_from_size` range-checks the
     // dimensions before the API call.
     let hr = unsafe {
-        CreatePseudoConsole(
+        (api.create)(
             coord_from_size(size)?,
             input.read.as_raw_handle() as HANDLE,
             output.write.as_raw_handle() as HANDLE,
@@ -314,7 +319,7 @@ fn create_pseudo_console(
         );
         return Err(hresult_error(hr).into());
     }
-    Ok(OwnedHpcon(hpc))
+    Ok(OwnedHpcon { hpc, api })
 }
 
 fn coord_from_size(size: TerminalSize) -> Result<COORD> {
@@ -348,21 +353,25 @@ struct WindowsPtyState {
     flags: ConptyFlags,
 }
 
+/// A pseudoconsole with the API that created it, which alone may resize and close it.
 #[derive(Debug)]
-struct OwnedHpcon(HPCON);
+struct OwnedHpcon {
+    hpc: HPCON,
+    api: &'static ConptyApi,
+}
 
 impl OwnedHpcon {
     fn raw(&self) -> HPCON {
-        self.0
+        self.hpc
     }
 
     fn close(&mut self) {
-        if self.0 != 0 {
+        if self.hpc != 0 {
             tracing::trace!(target: "rmux::conpty", "closing ConPTY");
             // SAFETY: `OwnedHpcon` owns a non-null ConPTY handle and closes it
             // exactly once here or from `Drop`.
-            unsafe { ClosePseudoConsole(self.0) };
-            self.0 = 0;
+            unsafe { (self.api.close)(self.hpc) };
+            self.hpc = 0;
         }
     }
 }
@@ -370,6 +379,77 @@ impl OwnedHpcon {
 impl Drop for OwnedHpcon {
     fn drop(&mut self) {
         self.close();
+    }
+}
+
+/// The ConPTY entry points: the system's, or those of the `conpty\conpty.dll` that
+/// scripts/fetch-conpty.ps1 places beside the executable, whose OpenConsole.exe then hosts panes.
+#[derive(Debug)]
+struct ConptyApi {
+    create: CreateFn,
+    resize: ResizeFn,
+    close: CloseFn,
+}
+
+type CreateFn = unsafe extern "system" fn(COORD, HANDLE, HANDLE, u32, *mut HPCON) -> i32;
+type ResizeFn = unsafe extern "system" fn(HPCON, COORD) -> i32;
+type CloseFn = unsafe extern "system" fn(HPCON);
+type ProcFn = unsafe extern "system" fn() -> isize;
+
+fn conpty_api() -> io::Result<&'static ConptyApi> {
+    static API: OnceLock<std::result::Result<ConptyApi, String>> = OnceLock::new();
+    API.get_or_init(load_conpty_api)
+        .as_ref()
+        .map_err(|error| io::Error::other(error.clone()))
+}
+
+fn load_conpty_api() -> std::result::Result<ConptyApi, String> {
+    let folder = std::env::current_exe()
+        .map_err(|error| format!("cannot locate the rmux executable: {error}"))?
+        .with_file_name("conpty");
+    if !folder.exists() {
+        return Ok(ConptyApi {
+            create: CreatePseudoConsole,
+            resize: ResizePseudoConsole,
+            close: ClosePseudoConsole,
+        });
+    }
+    let bundle = folder.join("conpty.dll");
+    let failed = |reason: String| {
+        format!(
+            "failed to load the bundled ConPTY {}: {reason}; remove its folder and restart the rmux server to use the system ConPTY",
+            bundle.display()
+        )
+    };
+    let path: Vec<u16> = bundle.as_os_str().encode_wide().chain([0]).collect();
+    // SAFETY: `path` is a NUL-terminated absolute path. The module stays loaded for the life of
+    // the process, as the returned entry points require.
+    let module = unsafe {
+        LoadLibraryExW(
+            path.as_ptr(),
+            std::ptr::null_mut(),
+            LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32,
+        )
+    };
+    if module.is_null() {
+        return Err(failed(io::Error::last_os_error().to_string()));
+    }
+    let symbol = |name: &[u8]| {
+        // SAFETY: `module` is loaded and `name` is NUL-terminated.
+        unsafe { GetProcAddress(module, name.as_ptr()) }.ok_or_else(|| {
+            failed(format!(
+                "missing {}",
+                String::from_utf8_lossy(&name[..name.len() - 1])
+            ))
+        })
+    };
+    // SAFETY: conpty.dll exports these with the same signatures as kernel32.
+    unsafe {
+        Ok(ConptyApi {
+            create: std::mem::transmute::<ProcFn, CreateFn>(symbol(b"CreatePseudoConsole\0")?),
+            resize: std::mem::transmute::<ProcFn, ResizeFn>(symbol(b"ResizePseudoConsole\0")?),
+            close: std::mem::transmute::<ProcFn, CloseFn>(symbol(b"ClosePseudoConsole\0")?),
+        })
     }
 }
 
