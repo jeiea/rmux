@@ -6,7 +6,7 @@ use std::sync::{Mutex, OnceLock, RwLock};
 use std::time::Duration;
 
 use windows_sys::Win32::Foundation::{
-    GetLastError, ERROR_BROKEN_PIPE, ERROR_INVALID_PARAMETER, E_HANDLE, HANDLE, S_OK,
+    GetLastError, ERROR_BROKEN_PIPE, ERROR_INVALID_PARAMETER, ERROR_NO_DATA, E_HANDLE, HANDLE, S_OK,
 };
 use windows_sys::Win32::System::Console::{
     ClosePseudoConsole, CreatePseudoConsole, ResizePseudoConsole, COORD, HPCON,
@@ -461,6 +461,7 @@ fn is_benign_resize_after_exit(hr: i32) -> bool {
     hr == E_HANDLE
         || hr == hresult_from_win32(ERROR_BROKEN_PIPE)
         || hr == hresult_from_win32(ERROR_INVALID_PARAMETER)
+        || hr == hresult_from_win32(ERROR_NO_DATA)
 }
 
 fn hresult_from_win32(error: u32) -> i32 {
@@ -487,9 +488,12 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn resize_after_exit_invalid_parameter_is_benign() {
+    fn resize_after_exit_invalid_parameter_or_closing_pipe_is_benign() {
         assert!(is_benign_resize_after_exit(hresult_from_win32(
             ERROR_INVALID_PARAMETER
+        )));
+        assert!(is_benign_resize_after_exit(hresult_from_win32(
+            ERROR_NO_DATA
         )));
     }
 
