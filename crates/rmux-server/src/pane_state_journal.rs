@@ -676,11 +676,8 @@ mod tests {
     }
 
     #[test]
-    fn capacity_rejects_n_plus_one_and_retains_oldest_closed_until_delivery() {
-        let mut journal = PaneStateJournal::with_limits(
-            2,
-            SubscriptionLimits::new(8, 8, 16, std::time::Duration::from_secs(60)),
-        );
+    fn one_connection_can_reach_capacity_and_closed_subscriptions_count_until_delivery() {
+        let mut journal = PaneStateJournal::new(17);
         let include = PaneStateInclude {
             title: false,
             options: false,
@@ -692,11 +689,16 @@ mod tests {
             .expect("first subscription fits capacity");
         let oldest_closed_revision = close_pane(&mut journal, pane_id(1));
         journal
-            .subscribe(8, pane_id(2), include)
-            .expect("Nth subscription fits capacity");
+            .subscribe(7, pane_id(2), include)
+            .expect("second subscription fits capacity");
         close_pane(&mut journal, pane_id(2));
+        for pane in 3..=17 {
+            journal
+                .subscribe(7, pane_id(pane), include)
+                .expect("one connection can fill the journal capacity");
+        }
 
-        for pane in 3..=4 {
+        for pane in 3..=19 {
             journal.push(
                 pane_id(pane),
                 Some(9),
@@ -708,10 +710,10 @@ mod tests {
         }
 
         assert_eq!(
-            journal.subscribe(9, pane_id(3), include),
-            Err(PaneStateSubscriptionError::Capacity { limit: 2 })
+            journal.subscribe(7, pane_id(18), include),
+            Err(PaneStateSubscriptionError::Capacity { limit: 17 })
         );
-        assert_eq!(journal.subscriptions.len(), 2);
+        assert_eq!(journal.subscriptions.len(), 17);
 
         let mut events = Vec::new();
         assert_eq!(
@@ -733,9 +735,9 @@ mod tests {
 
         assert!(journal.remove_closed_subscription(7, oldest));
         journal
-            .subscribe(9, pane_id(3), include)
+            .subscribe(7, pane_id(18), include)
             .expect("delivering Closed must release global capacity");
-        assert_eq!(journal.subscriptions.len(), 2);
+        assert_eq!(journal.subscriptions.len(), 17);
     }
 
     #[test]

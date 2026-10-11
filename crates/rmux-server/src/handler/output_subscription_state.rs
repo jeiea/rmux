@@ -640,28 +640,39 @@ mod tests {
     }
 
     #[test]
-    fn global_admission_accepts_the_limit_and_rejects_the_next_subscription() {
-        let limits = SubscriptionLimits::new(
-            MAX_OUTPUT_SUBSCRIPTIONS_GLOBAL + 1,
-            MAX_OUTPUT_SUBSCRIPTIONS_GLOBAL + 1,
-            16,
-            Duration::from_secs(60),
-        );
-        let mut state = OutputSubscriptionState::new(limits);
-        let pane = pane();
+    fn one_connection_can_subscribe_up_to_global_and_per_pane_limits() {
+        let mut state = OutputSubscriptionState::new(SubscriptionLimits::default());
+        let session = SessionName::new("many-panes").expect("valid session name");
         let now = Instant::now();
-        for connection_id in 1..=MAX_OUTPUT_SUBSCRIPTIONS_GLOBAL as u64 {
+        for id in 1..=MAX_OUTPUT_SUBSCRIPTIONS_GLOBAL as u32 {
             state
-                .subscribe(connection_id, pane.clone(), now)
+                .subscribe(
+                    1,
+                    PaneOutputSubscriptionKey::new(session.clone(), PaneId::new(id)),
+                    now,
+                )
                 .expect("subscription within the global limit");
         }
 
         assert_eq!(state.registry.len(), MAX_OUTPUT_SUBSCRIPTIONS_GLOBAL);
         assert_eq!(
-            state.subscribe(MAX_OUTPUT_SUBSCRIPTIONS_GLOBAL as u64 + 1, pane, now),
+            state.subscribe(2, pane(), now),
             Err(OutputSubscriptionAdmissionError::Global {
                 limit: MAX_OUTPUT_SUBSCRIPTIONS_GLOBAL,
             })
+        );
+
+        state.remove_connection(1);
+        for _ in 0..64 {
+            state
+                .subscribe(2, pane(), now)
+                .expect("pane within its limit");
+        }
+        assert_eq!(
+            state.subscribe(3, pane(), now),
+            Err(OutputSubscriptionAdmissionError::Configured(
+                SubscriptionLimitError::PerPane { limit: 64 },
+            ))
         );
     }
 }

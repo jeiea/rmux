@@ -12,7 +12,8 @@ mod windows {
     };
     use rmux_sdk::{
         EnsureSession, EnsureSessionPolicy, PaneExitState, PaneOutputChunk, PaneOutputStart,
-        PaneOutputStream, ProcessSpec, RmuxError, SplitDirection,
+        PaneOutputStream, PaneRecoveryEvent, PaneStateEvent, PaneStateEventsOptions, ProcessSpec,
+        RmuxError, SplitDirection,
     };
     use tokio::time::{timeout, Instant};
 
@@ -20,7 +21,8 @@ mod windows {
     const BURST_STREAM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
 
     #[tokio::test]
-    async fn rust_app_autostarts_and_drives_a_session_windows() -> TestResult {
+    async fn rust_app_drives_a_session_and_observes_more_than_sixteen_panes_windows() -> TestResult
+    {
         let _lock = LIVE_DAEMON_LOCK.lock().await;
         let harness = Harness::start("rustapp").await?;
         let rmux = harness.rmux();
@@ -45,6 +47,32 @@ mod windows {
         pane.wait_for_text(marker).await?;
         assert!(pane.snapshot().await?.visible_text().contains(marker));
 
+        let mut outputs = Vec::new();
+        let mut states = Vec::new();
+        for _ in 0..17 {
+            let window = session
+                .new_window_with()
+                .detached(true)
+                .spawn(cmd_interactive_command())
+                .await?;
+            let pane = session.pane_by_id(window.panes().await?[0].id).await?;
+            outputs.push(pane.recover_output().await?);
+            states.push(pane.state_events(PaneStateEventsOptions::default()).await?);
+        }
+        for output in &mut outputs {
+            assert!(matches!(
+                output.next().await?,
+                Some(PaneRecoveryEvent::Rebase(_))
+            ));
+        }
+        for state in &mut states {
+            assert!(matches!(
+                state.next().await?,
+                Some(PaneStateEvent::Snapshot { .. })
+            ));
+        }
+        drop(outputs);
+        drop(states);
         harness.finish().await
     }
 

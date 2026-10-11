@@ -3,8 +3,8 @@ use std::time::{Duration, Instant};
 
 use rmux_proto::{PaneId, PaneOutputSubscriptionId, SessionName};
 
-/// Default maximum live pane-output subscriptions owned by one connection.
-pub const DEFAULT_MAX_SUBSCRIPTIONS_PER_CONNECTION: usize = 16;
+/// No default per-connection cap; daemon-wide and per-pane budgets still apply.
+pub const DEFAULT_MAX_SUBSCRIPTIONS_PER_CONNECTION: usize = usize::MAX;
 /// Default maximum live pane-output subscriptions attached to one pane.
 pub const DEFAULT_MAX_SUBSCRIPTIONS_PER_PANE: usize = 64;
 /// Default maximum output events returned by one cursor poll.

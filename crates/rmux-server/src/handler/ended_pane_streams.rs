@@ -6,8 +6,7 @@ use rmux_proto::PaneOutputSubscriptionId;
 use super::super::super::pane_stream_support::EndedPaneStream;
 use super::MAX_OUTPUT_SUBSCRIPTIONS_GLOBAL;
 
-// Keep four generations of the default 16 live streams so a client can observe recent End
-// reasons without letting a durable connection retain an unbounded history.
+// Retain at least 64 recent End reasons per connection, bounded by the global budget.
 const MAX_ENDED_STREAMS_PER_CONNECTION: usize = 64;
 const _: () = assert!(MAX_ENDED_STREAMS_PER_CONNECTION <= MAX_OUTPUT_SUBSCRIPTIONS_GLOBAL);
 
