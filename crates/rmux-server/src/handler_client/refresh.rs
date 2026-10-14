@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 
-use rmux_core::LifecycleEvent;
+use rmux_core::{input::OscColourSlot, LifecycleEvent};
 use rmux_proto::request::RefreshClientRequest;
 use rmux_proto::{
-    ErrorResponse, RefreshClientResponse, Response, RmuxError, SessionId, SessionName,
+    ErrorResponse, PaneId, RefreshClientResponse, Response, RmuxError, SessionId, SessionName,
     TerminalSize, WindowTarget,
 };
 
@@ -38,6 +38,18 @@ impl RequestHandler {
             Ok(client) => client,
             Err(error) => return Response::Error(ErrorResponse { error }),
         };
+
+        // Any client may report, but only an attached control client gets the
+        // colours answered, as in tmux.
+        if let Some((pane_id, slot, rgb)) = request
+            .colour_report
+            .as_deref()
+            .and_then(parse_colour_report)
+        {
+            let mut state = self.state.lock().await;
+            let answered = !self.active_control.lock().await.by_pid.is_empty();
+            state.report_pane_colour(pane_id, slot, rgb, answered);
+        }
 
         match client {
             ManagedClient::Attach {
@@ -482,9 +494,6 @@ fn validate_refresh_supported_request(request: &RefreshClientRequest) -> Result<
     if !request.subscriptions_format.is_empty() {
         unsupported.push("-B");
     }
-    if request.colour_report.is_some() {
-        unsupported.push("-r");
-    }
     if unsupported.is_empty() {
         return Ok(());
     }
@@ -492,6 +501,53 @@ fn validate_refresh_supported_request(request: &RefreshClientRequest) -> Result<
         "refresh-client {} is not supported",
         unsupported.join("/")
     )))
+}
+
+/// A `refresh-client -r` report: `%pane:` and the outer terminal's answer to
+/// an OSC 10 or 11 query, ended by BEL or ST. tmux ignores a report it cannot
+/// read, and so does this.
+fn parse_colour_report(value: &str) -> Option<(PaneId, OscColourSlot, (u8, u8, u8))> {
+    let (pane, report) = value.strip_prefix('%')?.split_once(':')?;
+    let pane = PaneId::new(pane.parse().ok()?);
+    let (slot, answer) = match report.strip_prefix("\x1b]10;") {
+        Some(answer) => (OscColourSlot::Foreground, answer),
+        None => (OscColourSlot::Background, report.strip_prefix("\x1b]11;")?),
+    };
+    let spec = answer
+        .strip_suffix('\x07')
+        .or_else(|| answer.strip_suffix("\x1b\\"))?;
+    Some((pane, slot, x11_rgb(spec)?))
+}
+
+/// An X11 colour in the `rgb:` and `#` forms tmux's `colour_parseX11` reads,
+/// two or four hex digits a channel, of which four keep the high byte. Colour
+/// names and CMYK are not read.
+fn x11_rgb(spec: &str) -> Option<(u8, u8, u8)> {
+    let channels: Vec<&str> = match spec.strip_prefix("rgb:") {
+        Some(rgb) => rgb.split('/').collect(),
+        None => {
+            let hex = spec.strip_prefix('#')?;
+            let digits = hex.len() / 3;
+            hex.as_bytes()
+                .chunks(digits.max(1))
+                .map(|chunk| std::str::from_utf8(chunk).ok())
+                .collect::<Option<_>>()?
+        }
+    };
+    let [red, green, blue] = channels[..] else {
+        return None;
+    };
+    let digits = red.len();
+    if !matches!(digits, 2 | 4) {
+        return None;
+    }
+    let channel = |channel: &str| {
+        (channel.len() == digits && channel.bytes().all(|byte| byte.is_ascii_hexdigit()))
+            .then(|| u16::from_str_radix(channel, 16).ok())
+            .flatten()
+            .map(|value| (value >> (4 * (digits - 2))) as u8)
+    };
+    Some((channel(red)?, channel(green)?, channel(blue)?))
 }
 
 fn parse_control_size(value: &str) -> Option<TerminalSize> {
@@ -503,8 +559,59 @@ fn parse_control_size(value: &str) -> Option<TerminalSize> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_control_size;
-    use rmux_proto::TerminalSize;
+    use super::{parse_colour_report, parse_control_size};
+    use rmux_core::input::OscColourSlot;
+    use rmux_proto::{PaneId, TerminalSize};
+
+    #[test]
+    fn colour_report_reads_osc_10_and_11_answers_like_tmux() {
+        assert_eq!(
+            parse_colour_report("%3:\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\"),
+            Some((
+                PaneId::new(3),
+                OscColourSlot::Background,
+                (0x1e, 0x1e, 0x2e)
+            ))
+        );
+        assert_eq!(
+            parse_colour_report("%0:\x1b]10;#ff8000\x07"),
+            Some((PaneId::new(0), OscColourSlot::Foreground, (255, 128, 0)))
+        );
+    }
+
+    #[test]
+    fn colour_report_keeps_the_high_byte_of_four_digits_like_tmux() {
+        for spec in ["rgb:80ff/80ff/80ff", "#80ff80ff80ff"] {
+            assert_eq!(
+                parse_colour_report(&format!("%0:\x1b]11;{spec}\x07")),
+                Some((PaneId::new(0), OscColourSlot::Background, (128, 128, 128))),
+                "{spec}"
+            );
+        }
+    }
+
+    #[test]
+    fn colour_report_ignores_colour_names_unlike_tmux() {
+        assert_eq!(parse_colour_report("%3:\x1b]11;white\x07"), None);
+    }
+
+    #[test]
+    fn colour_report_ignores_what_tmux_cannot_read() {
+        for value in [
+            "3:\x1b]11;rgb:0/0/0\x07",
+            "%x:\x1b]11;rgb:0/0/0\x07",
+            "%3:\x1b]12;rgb:0/0/0\x07",
+            "%3:\x1b]11;rgb:0/0/0",
+            "%3:\x1b]11;rgb:0/0\x07",
+            "%3:\x1b]11;rgb:00000/0/0\x07",
+            "%3:\x1b]11;rgb:+1/0/0\x07",
+            "%3:\x1b]11;rgb:f/80/0\x07",
+            "%3:\x1b]11;rgb:ff/ff/ffff\x07",
+            "%3:\x1b]11;#fff\x07",
+        ] {
+            assert_eq!(parse_colour_report(value), None, "{value:?}");
+        }
+    }
 
     #[test]
     fn control_size_accepts_tmux_separators() {

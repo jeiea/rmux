@@ -1,4 +1,6 @@
-use rmux_core::{GridRenderOptions, PaneId, Screen, ScreenCaptureRange, Utf8Config};
+use rmux_core::{
+    input::OscColourSlot, GridRenderOptions, PaneId, Screen, ScreenCaptureRange, Utf8Config,
+};
 use rmux_proto::{
     OptionName, OptionScopeSelector, PaneTarget, RmuxError, ScopeSelector, SessionName,
 };
@@ -759,6 +761,29 @@ impl HandlerState {
     }
 
     #[cfg(test)]
+    pub(crate) fn pane_transcript_replies_for_test(
+        &self,
+        session_name: &SessionName,
+        window_index: u32,
+        pane_index: u32,
+        bytes: &[u8],
+    ) -> Result<Vec<u8>, RmuxError> {
+        let pane_id = pane_id_for_target(&self.sessions, session_name, window_index, pane_index)?;
+        let runtime_session_name = self.runtime_session_name_for_window(session_name, window_index);
+        self.transcripts
+            .get(&runtime_session_name)
+            .and_then(|panes| panes.get(&pane_id))
+            .ok_or_else(|| missing_pane_terminal(session_name, window_index, pane_index))
+            .map(|transcript| {
+                transcript
+                    .lock()
+                    .expect("pane transcript mutex must not be poisoned")
+                    .append_bytes_and_take_replies(bytes)
+                    .replies
+            })
+    }
+
+    #[cfg(test)]
     pub(crate) fn append_bytes_to_pane_transcript_for_test(
         &mut self,
         session_name: &SessionName,
@@ -878,6 +903,38 @@ impl HandlerState {
                     .lock()
                     .expect("pane transcript mutex must not be poisoned")
                     .set_input_buffer_limit(limit);
+            }
+        }
+    }
+
+    /// Records the colour a client reported for `pane_id` with
+    /// `refresh-client -r`, answered while a control client is attached.
+    pub(crate) fn report_pane_colour(
+        &mut self,
+        pane_id: PaneId,
+        slot: OscColourSlot,
+        rgb: (u8, u8, u8),
+        answered: bool,
+    ) {
+        for transcripts in self.transcripts.values() {
+            if let Some(transcript) = transcripts.get(&pane_id) {
+                transcript
+                    .lock()
+                    .expect("pane transcript mutex must not be poisoned")
+                    .report_colour(slot, rgb, answered);
+            }
+        }
+    }
+
+    /// Answers every pane's queries with its reported colours, or stops, as a
+    /// first control client attaches or the last one leaves.
+    pub(crate) fn answer_reported_colours(&mut self, answered: bool) {
+        for transcripts in self.transcripts.values() {
+            for transcript in transcripts.values() {
+                transcript
+                    .lock()
+                    .expect("pane transcript mutex must not be poisoned")
+                    .answer_reported_colours(answered);
             }
         }
     }

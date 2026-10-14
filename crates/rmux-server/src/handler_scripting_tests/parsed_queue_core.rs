@@ -1453,6 +1453,7 @@ async fn parsed_queue_compact_client_and_overlay_flags_preserve_their_meaning() 
             "-C80x24",
             "-factive-pane",
             "-Fno-detach-on-destroy",
+            "-r%0:rgb:0/0/0",
             "-t=",
         ],
     ) else {
@@ -1463,6 +1464,7 @@ async fn parsed_queue_compact_client_and_overlay_flags_preserve_their_meaning() 
     assert_eq!(request.control_size.as_deref(), Some("80x24"));
     assert_eq!(request.flags.as_deref(), Some("active-pane"));
     assert_eq!(request.flags_alias.as_deref(), Some("no-detach-on-destroy"));
+    assert_eq!(request.colour_report.as_deref(), Some("%0:rgb:0/0/0"));
     assert_eq!(request.target_client.as_deref(), Some("="));
 
     let Request::SwitchClientExt3(request) = parse("switch-client", &["-Er"]) else {
@@ -1507,10 +1509,6 @@ async fn parsed_queue_refresh_client_unsupported_fields_are_rejected() {
         (
             "refresh-client -B name:pane:format",
             "command refresh-client: unknown flag -B",
-        ),
-        (
-            "refresh-client -r pane:rgb",
-            "command refresh-client: unknown flag -r",
         ),
         (
             "refresh-client -c",

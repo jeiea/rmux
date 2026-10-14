@@ -14,6 +14,8 @@ pub(crate) struct RefreshClientArgs {
     pub(crate) clipboard_query: bool,
     #[arg(short = 'S', action = ArgAction::SetTrue)]
     pub(crate) status_only: bool,
+    #[arg(short = 'r', value_name = "pane:report", allow_hyphen_values = true)]
+    pub(crate) colour_report: Option<String>,
     #[arg(short = 't', allow_hyphen_values = true)]
     pub(crate) target_client: Option<String>,
 }

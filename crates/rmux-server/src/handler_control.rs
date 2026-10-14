@@ -587,6 +587,9 @@ impl RequestHandler {
                         queue_drain_finished,
                     },
                 );
+                if previous.is_none() && active_control.by_pid.len() == 1 {
+                    state.answer_reported_colours(true);
+                }
                 let (replaced_session, detached_event) = if let Some(previous) = previous {
                     let replaced_session = previous.session_name.clone().zip(previous.session_id);
                     let detached_event =
@@ -678,6 +681,9 @@ impl RequestHandler {
             } else {
                 None
             };
+            if removed_control.is_some() && active_control.by_pid.is_empty() {
+                state.answer_reported_colours(false);
+            }
             match removed_control {
                 Some(removed) => {
                     removed.queue_drain_finished.send_replace(true);
@@ -1698,6 +1704,9 @@ impl RequestHandler {
                 })
             })
             .collect();
+        if active_control.by_pid.is_empty() {
+            state.answer_reported_colours(false);
+        }
 
         ControlClientsDetachOutcome { lifecycle_events }
     }

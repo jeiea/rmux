@@ -576,7 +576,7 @@ fn answer_osc_colour_query(
         return false;
     }
 
-    if let Some(colour) = parser.osc_colour(slot) {
+    if let Some(colour) = parser.reported_colour(slot) {
         let reply = format!(
             "\x1b]{};{}{}",
             slot.osc_number(),

@@ -1468,3 +1468,111 @@ async fn detach_client_requires_an_attached_client() {
         })
     );
 }
+
+#[tokio::test]
+async fn refresh_client_colour_report_answers_the_pane_across_respawns_until_the_last_control_client_leaves(
+) {
+    let handler = RequestHandler::new();
+    let control_pid = std::process::id();
+    let alpha = session_name("colour-report");
+    let created = handler
+        .handle(Request::NewSession(NewSessionRequest {
+            session_name: alpha.clone(),
+            detached: true,
+            size: Some(TerminalSize { cols: 80, rows: 24 }),
+            environment: None,
+        }))
+        .await;
+    assert!(matches!(created, Response::NewSession(_)));
+    let (control_id, _events) = register_control_test_client(&handler, control_pid, &alpha).await;
+    let other_pid = control_pid + 1;
+    let (other_id, _other_events) = register_control_test_client(&handler, other_pid, &alpha).await;
+    let pane_id = {
+        let state = handler.state.lock().await;
+        crate::pane_terminal_lookup::pane_id_for_target(&state.sessions, &alpha, 0, 0)
+            .expect("pane exists")
+    };
+    let query = b"\x1b]11;?\x07";
+
+    let response = handler
+        .dispatch(
+            control_pid,
+            Request::RefreshClient(Box::new(rmux_proto::request::RefreshClientRequest {
+                target_client: None,
+                adjustment: None,
+                clear_pan: false,
+                pan_left: false,
+                pan_right: false,
+                pan_up: false,
+                pan_down: false,
+                status_only: false,
+                clipboard_query: false,
+                flags: None,
+                flags_alias: None,
+                subscriptions: Vec::new(),
+                subscriptions_format: Vec::new(),
+                control_size: None,
+                colour_report: Some(format!("{pane_id}:\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\")),
+            })),
+        )
+        .await
+        .response;
+    assert!(matches!(response, Response::RefreshClient(_)));
+    assert_eq!(
+        handler
+            .state
+            .lock()
+            .await
+            .pane_transcript_replies_for_test(&alpha, 0, 0, query)
+            .expect("transcript exists"),
+        b"\x1b]11;rgb:1e1e/1e1e/2e2e\x07"
+    );
+
+    let respawned = handler
+        .handle(Request::RespawnPane(Box::new(
+            rmux_proto::RespawnPaneRequest {
+                target: PaneTarget::new(alpha.clone(), 0),
+                kill: true,
+                start_directory: None,
+                environment: None,
+                command: None,
+                process_command: None,
+            },
+        )))
+        .await;
+    assert!(
+        matches!(respawned, Response::RespawnPane(_)),
+        "{respawned:?}"
+    );
+    assert_eq!(
+        handler
+            .state
+            .lock()
+            .await
+            .pane_transcript_replies_for_test(&alpha, 0, 0, query)
+            .expect("transcript exists"),
+        b"\x1b]11;rgb:1e1e/1e1e/2e2e\x07"
+    );
+
+    handler.finish_control(control_pid, control_id).await;
+    assert_eq!(
+        handler
+            .state
+            .lock()
+            .await
+            .pane_transcript_replies_for_test(&alpha, 0, 0, query)
+            .expect("transcript exists"),
+        b"\x1b]11;rgb:1e1e/1e1e/2e2e\x07"
+    );
+
+    handler.finish_control(other_pid, other_id).await;
+    assert_eq!(
+        handler
+            .state
+            .lock()
+            .await
+            .pane_transcript_replies_for_test(&alpha, 0, 0, query)
+            .expect("transcript exists"),
+        b""
+    );
+}

@@ -131,6 +131,11 @@ impl TerminalParser {
         self.parser.set_input_buffer_limit(limit);
     }
 
+    /// Sets the colour a control client reported for OSC 10/11/12 queries.
+    pub(crate) fn set_control_colour(&mut self, slot: OscColourSlot, rgb: Option<(u8, u8, u8)>) {
+        self.parser.set_control_colour(slot, rgb);
+    }
+
     /// Resizes the screen and resets the scroll region.
     pub(crate) fn resize(&mut self, size: TerminalSize) {
         self.screen.resize(size);

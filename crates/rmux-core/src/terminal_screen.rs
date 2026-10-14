@@ -69,6 +69,13 @@ impl TerminalScreen {
         self.parser.set_input_buffer_limit(limit);
     }
 
+    /// Sets the colour a control client reported with `refresh-client -r`,
+    /// which OSC 10/11/12 queries answer ahead of the application's, or
+    /// forgets it with `None`.
+    pub fn set_control_colour(&mut self, slot: OscColourSlot, rgb: Option<(u8, u8, u8)>) {
+        self.parser.set_control_colour(slot, rgb);
+    }
+
     /// Resizes the screen and resets the scroll region.
     pub fn resize(&mut self, size: TerminalSize) {
         self.parser.resize(size);

@@ -206,7 +206,6 @@ fn refresh_client_unsupported_fields_are_absent_from_cli_help_and_completion() {
     for arguments in [
         &["refresh-client", "-A", "%0:on"][..],
         &["refresh-client", "-B", "name:%0:#{pane_id}"][..],
-        &["refresh-client", "-r", "%0:rgb"][..],
         &["refresh-client", "-c"][..],
         &["refresh-client", "-D"][..],
         &["refresh-client", "-L"][..],
@@ -224,6 +223,7 @@ fn refresh_client_unsupported_fields_are_absent_from_cli_help_and_completion() {
         &["refresh-client", "-F", "active-pane"][..],
         &["refresh-client", "-l"][..],
         &["refresh-client", "-S"][..],
+        &["refresh-client", "-r", "%0:\x1b]11;rgb:0/0/0\x07"][..],
         &["refresh-client", "-t", "="][..],
     ] {
         super::parse_args(arguments).expect("supported refresh-client field parses");
@@ -237,7 +237,7 @@ fn refresh_client_unsupported_fields_are_absent_from_cli_help_and_completion() {
         !help.contains("adjustment"),
         "refresh-client help advertised unsupported adjustment: {help}"
     );
-    for unsupported in ["-A", "-B", "-r", "-c", "-D", "-L", "-R", "-U"] {
+    for unsupported in ["-A", "-B", "-c", "-D", "-L", "-R", "-U"] {
         assert!(
             !help
                 .lines()
@@ -261,10 +261,10 @@ fn refresh_client_unsupported_fields_are_absent_from_cli_help_and_completion() {
             .all(|argument| argument.get_id() != "adjustment"),
         "refresh-client completion advertised unsupported adjustment"
     );
-    for unsupported in ['A', 'B', 'D', 'L', 'R', 'U', 'c', 'r'] {
+    for unsupported in ['A', 'B', 'D', 'L', 'R', 'U', 'c'] {
         assert!(!shorts.contains(&unsupported));
     }
-    for supported in ['C', 'F', 'S', 'f', 'l', 't'] {
+    for supported in ['C', 'F', 'S', 'f', 'l', 'r', 't'] {
         assert!(
             shorts.contains(&supported),
             "missing supported -{supported}"
@@ -277,7 +277,7 @@ fn refresh_client_unsupported_fields_are_absent_from_cli_help_and_completion() {
             "refresh-client",
             Some("refresh"),
         ),
-        "refresh-client (refresh) [-lS] [-C XxY] [-f flags] [-F flags] [-t target-client]"
+        "refresh-client (refresh) [-lS] [-C XxY] [-f flags] [-F flags] [-r pane:report] [-t target-client]"
     );
 }
 

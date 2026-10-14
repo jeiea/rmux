@@ -323,7 +323,7 @@ pub(super) fn run_refresh_client(
             subscriptions: Vec::new(),
             subscriptions_format: Vec::new(),
             control_size: args.control_size,
-            colour_report: None,
+            colour_report: args.colour_report,
         })
     })
 }

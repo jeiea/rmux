@@ -548,8 +548,6 @@ async fn refresh_client_reserved_wire_fields_from_old_clients_are_rejected() {
     subscriptions.subscriptions = vec!["%0:on".to_owned()];
     let mut subscriptions_format = base_request();
     subscriptions_format.subscriptions_format = vec!["name:%0:#{pane_id}".to_owned()];
-    let mut colour_report = base_request();
-    colour_report.colour_report = Some("%0".to_owned());
 
     for (request, expected) in [
         (clear_pan, "refresh-client -c is not supported"),
@@ -560,7 +558,6 @@ async fn refresh_client_reserved_wire_fields_from_old_clients_are_rejected() {
         (adjustment, "refresh-client adjustment is not supported"),
         (subscriptions, "refresh-client -A is not supported"),
         (subscriptions_format, "refresh-client -B is not supported"),
-        (colour_report, "refresh-client -r is not supported"),
     ] {
         let response = handler
             .dispatch(

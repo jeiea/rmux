@@ -51,6 +51,10 @@ pub(crate) struct PaneTranscript {
     ground_timer_started_at: Option<Instant>,
     ground_timer_token: u64,
     pending_palette_queries: PendingPaletteQueries,
+    /// The foreground and background a client reported with `refresh-client -r`.
+    reported_colours: [Option<(u8, u8, u8)>; 2],
+    /// Whether a control client is attached to have the reported colours answered.
+    reported_colours_answered: bool,
     #[cfg(test)]
     utf8_config: Utf8Config,
 }
@@ -113,6 +117,8 @@ impl PaneTranscript {
             ground_timer_started_at: None,
             ground_timer_token: 0,
             pending_palette_queries: PendingPaletteQueries::default(),
+            reported_colours: [None; 2],
+            reported_colours_answered: false,
             #[cfg(test)]
             utf8_config: Utf8Config::default(),
         }
@@ -283,6 +289,32 @@ impl PaneTranscript {
 
     pub(crate) fn set_input_buffer_limit(&mut self, limit: usize) {
         self.terminal.set_input_buffer_limit(limit);
+    }
+
+    /// Records the default foreground (OSC 10) or background (OSC 11) a client
+    /// reported for this pane, answered while `answered` holds.
+    pub(crate) fn report_colour(&mut self, slot: OscColourSlot, rgb: (u8, u8, u8), answered: bool) {
+        let index = usize::from(slot == OscColourSlot::Background);
+        self.reported_colours[index] = Some(rgb);
+        self.answer_reported_colours(answered);
+    }
+
+    /// Answers the pane's OSC 10/11 queries with the reported colours, or
+    /// stops, as tmux does while a control client is or is not attached.
+    pub(crate) fn answer_reported_colours(&mut self, answered: bool) {
+        self.reported_colours_answered = answered;
+        let [fg, bg] = self.reported_colours.map(|rgb| rgb.filter(|_| answered));
+        self.terminal
+            .set_control_colour(OscColourSlot::Foreground, fg);
+        self.terminal
+            .set_control_colour(OscColourSlot::Background, bg);
+    }
+
+    /// Keeps the colours reported for the pane `previous` belonged to, as tmux
+    /// keeps them on the pane across a respawned process.
+    pub(crate) fn keep_reported_colours(&mut self, previous: &PaneTranscript) {
+        self.reported_colours = previous.reported_colours;
+        self.answer_reported_colours(previous.reported_colours_answered);
     }
 
     pub(crate) fn capture_main(

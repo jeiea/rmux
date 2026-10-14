@@ -124,9 +124,9 @@ evidence = ["crates/rmux-core/src/formats/tests/operators.rs", "tests/display_me
 
 [[entry]]
 id = "C-D50"
-summary = "OSC colour queries return only application-set values"
+summary = "OSC colour queries return only refresh-client -r reports, read in rgb: and # forms, and application-set values"
 inventory = "bounded"
-tests = ["crates/rmux-core/src/input/tests/osc_dcs_misc.rs::osc_11_set_then_query_round_trips_product_divergence"]
+tests = ["crates/rmux-core/src/input/tests/osc_dcs_misc.rs::osc_11_set_then_query_round_trips_product_divergence", "crates/rmux-server/src/handler_tests/clients.rs::refresh_client_colour_report_answers_the_pane_across_respawns_until_the_last_control_client_leaves", "crates/rmux-server/src/handler_client/refresh.rs::colour_report_ignores_colour_names_unlike_tmux"]
 
 [[entry]]
 id = "C-D51"

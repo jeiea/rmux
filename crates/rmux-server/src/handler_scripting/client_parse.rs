@@ -216,6 +216,7 @@ pub(super) fn parse_refresh_client(mut args: CommandTokens) -> Result<Request, R
     let mut flags_alias = None;
     let mut clipboard_query = false;
     let mut status_only = false;
+    let mut colour_report = None;
 
     while let Some(token) = args.peek().map(str::to_owned) {
         match token.as_str() {
@@ -243,13 +244,17 @@ pub(super) fn parse_refresh_client(mut args: CommandTokens) -> Result<Request, R
                 let _ = args.optional();
                 status_only = true;
             }
+            "-r" => {
+                let _ = args.optional();
+                colour_report = Some(args.required("-r pane:report")?);
+            }
             "-t" => {
                 let _ = args.optional();
                 target_client = Some(args.required("-t target-client")?);
             }
             _ => {
                 let Some(cluster) =
-                    parse_compact_flag_cluster("refresh-client", &token, "lS", "CfFt")?
+                    parse_compact_flag_cluster("refresh-client", &token, "lS", "CfFrt")?
                 else {
                     if token.starts_with('-') {
                         return Err(unsupported_flag("refresh-client", &token));
@@ -270,6 +275,10 @@ pub(super) fn parse_refresh_client(mut args: CommandTokens) -> Result<Request, R
                         }
                         compact_flag @ CompactFlag::Value { flag: 'F', .. } => {
                             flags_alias = Some(compact_flag.value_or_next(&mut args, "-F flags")?);
+                        }
+                        compact_flag @ CompactFlag::Value { flag: 'r', .. } => {
+                            colour_report =
+                                Some(compact_flag.value_or_next(&mut args, "-r pane:report")?);
                         }
                         compact_flag @ CompactFlag::Value { flag: 't', .. } => {
                             target_client =
@@ -299,7 +308,7 @@ pub(super) fn parse_refresh_client(mut args: CommandTokens) -> Result<Request, R
         subscriptions: Vec::new(),
         subscriptions_format: Vec::new(),
         control_size,
-        colour_report: None,
+        colour_report,
     })))
 }
 

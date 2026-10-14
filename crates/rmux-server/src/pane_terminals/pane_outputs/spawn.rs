@@ -352,6 +352,20 @@ impl HandlerState {
         {
             reader.abort();
         }
+        if let Some(previous) = self
+            .transcripts
+            .get(session_name)
+            .and_then(|panes| panes.get(&pane_id))
+        {
+            transcript
+                .lock()
+                .expect("pane transcript mutex must not be poisoned")
+                .keep_reported_colours(
+                    &previous
+                        .lock()
+                        .expect("pane transcript mutex must not be poisoned"),
+                );
+        }
         self.transcripts
             .entry(session_name.clone())
             .or_default()

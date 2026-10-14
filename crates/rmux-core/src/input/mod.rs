@@ -153,6 +153,9 @@ pub struct InputParser {
     /// Application-set OSC 10/11/12 colours (fg, bg, cursor). The daemon does
     /// not invent colours for an unknown attached terminal palette.
     osc_colours: [Option<String>; 3],
+    /// Colours a control client reported for this pane with
+    /// `refresh-client -r`, which tmux answers ahead of the application's.
+    control_colours: [Option<String>; 3],
 }
 
 impl InputParser {
@@ -185,6 +188,7 @@ impl InputParser {
             reply_buf: Vec::new(),
             terminal_passthrough_dropped_count: 0,
             osc_colours: [None, None, None],
+            control_colours: [None, None, None],
         }
     }
 
@@ -209,6 +213,22 @@ impl InputParser {
             return;
         }
         self.osc_colours[slot.index()] = Some(value.to_owned());
+    }
+
+    /// Returns the colour an OSC 10/11/12 query reports: the one a control
+    /// client reported, else the application's.
+    pub(crate) fn reported_colour(&self, slot: OscColourSlot) -> Option<&str> {
+        self.control_colours[slot.index()]
+            .as_deref()
+            .or(self.osc_colour(slot))
+    }
+
+    /// Sets the colour a control client reported for queries, or forgets it
+    /// with `None`.
+    pub(crate) fn set_control_colour(&mut self, slot: OscColourSlot, rgb: Option<(u8, u8, u8)>) {
+        self.control_colours[slot.index()] = rgb.map(|(red, green, blue)| {
+            format!("rgb:{red:02x}{red:02x}/{green:02x}{green:02x}/{blue:02x}{blue:02x}")
+        });
     }
 
     /// Resets an OSC colour back to unknown (OSC 110/111/112).

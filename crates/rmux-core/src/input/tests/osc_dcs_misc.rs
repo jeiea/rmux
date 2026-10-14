@@ -286,6 +286,33 @@ fn osc_111_reset_makes_background_unknown_again() {
     assert!(p.reply_buf.is_empty());
 }
 
+fn parse_with_control_background(input: &[u8]) -> InputParser {
+    let mut parser = InputParser::new();
+    parser.set_control_colour(OscColourSlot::Background, Some((0x1e, 0x1e, 0x2e)));
+    parser.parse(input, &mut RecordingWriter::new(80, 24));
+    parser
+}
+
+#[test]
+fn osc_11_query_reports_control_client_background() {
+    let p = parse_with_control_background(b"\x1b]11;?\x07");
+    let replies = String::from_utf8_lossy(&p.reply_buf);
+    assert_eq!(replies.as_ref(), "\x1b]11;rgb:1e1e/1e1e/2e2e\x07");
+}
+
+#[test]
+fn osc_11_control_client_background_wins_over_application_bg_like_tmux() {
+    let p = parse_with_control_background(b"\x1b]11;rgb:1111/2222/3333\x1b\\\x1b]11;?\x1b\\");
+    let replies = String::from_utf8_lossy(&p.reply_buf);
+    assert_eq!(replies.as_ref(), "\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\");
+}
+
+#[test]
+fn control_client_background_is_not_an_application_colour() {
+    let p = parse_with_control_background(b"");
+    assert_eq!(p.osc_colour(OscColourSlot::Background), None);
+}
+
 #[test]
 fn osc_10_set_still_reaches_writer() {
     let (_p, w) = parse(b"\x1b]10;rgb:eeee/eeee/eeee\x1b\\");
