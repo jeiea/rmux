@@ -32,7 +32,7 @@ impl AttachScreenTracker {
     pub(super) fn mark_stopped(&self) -> AttachStopGeneration {
         let state = self
             .state
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
                 Some(current.saturating_add(2) | ATTACH_SCREEN_STOPPED_BIT)
             })
             .expect("attach screen generation update is infallible");

@@ -24,7 +24,7 @@ impl WindowIdAllocator {
     pub(crate) fn allocate(&self) -> WindowId {
         let next = self
             .next
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
                 (value != u32::MAX).then_some(value + 1)
             })
             .expect("window id space exhausted");
@@ -35,7 +35,7 @@ impl WindowIdAllocator {
     pub(crate) fn bump_to(&self, next: u32) {
         let _ = self
             .next
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                 (current < next).then_some(next)
             });
     }

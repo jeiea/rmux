@@ -89,7 +89,7 @@ impl AccountedBacklog {
         len: usize,
     ) -> Result<Self, OutboundQueueResult> {
         backlog_bytes
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                 current
                     .checked_sub(replaced_len)?
                     .checked_add(len)
@@ -291,7 +291,7 @@ impl WebSocketOutbound {
         })?;
         if self
             .backlog_bytes
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                 current
                     .checked_add(len)
                     .filter(|next| *next <= WEB_OUTBOUND_BYTES_MAX)
@@ -570,7 +570,7 @@ fn log_writer_failure(frame: &'static str, result: &io::Result<()>) -> bool {
 }
 
 fn subtract_backlog(backlog_bytes: &AtomicUsize, len: usize) {
-    let _ = backlog_bytes.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+    let _ = backlog_bytes.try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
         Some(current.saturating_sub(len))
     });
 }

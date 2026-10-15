@@ -163,7 +163,7 @@ impl Drop for PendingDeepSwitchReservation {
     fn drop(&mut self) {
         let _ = self
             .count
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
                 current.checked_sub(1)
             });
     }
@@ -536,7 +536,7 @@ fn reserve_attach_control_backlog(
     backlog_limit: usize,
 ) -> bool {
     backlog
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
             current
                 .checked_add(units)
                 .filter(|next| *next <= backlog_limit)
@@ -546,7 +546,7 @@ fn reserve_attach_control_backlog(
 
 fn reserve_pending_deep_switch(count: &AtomicUsize) -> bool {
     count
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
             current
                 .checked_add(1)
                 .filter(|next| *next <= AttachControlSender::MAX_PENDING_DEEP_SWITCHES)
@@ -558,7 +558,7 @@ pub(crate) fn release_attach_control_backlog(backlog: &AtomicUsize, units: usize
     if units == 0 {
         return;
     }
-    let _ = backlog.fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+    let _ = backlog.try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
         current.checked_sub(units)
     });
 }

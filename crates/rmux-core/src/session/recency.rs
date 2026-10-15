@@ -37,10 +37,10 @@ pub struct SessionRecency(u64);
 impl SessionRecency {
     /// Mints the next token in the process-local total order.
     pub(super) fn next() -> Self {
-        // `fetch_update` rather than `fetch_add` so exhaustion aborts instead
+        // `try_update` rather than `fetch_add` so exhaustion aborts instead
         // of wrapping a live ordering key back behind existing sessions.
         let sequence = NEXT_SESSION_RECENCY
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                 current.checked_add(1)
             })
             .expect("session recency sequence exhausted");
